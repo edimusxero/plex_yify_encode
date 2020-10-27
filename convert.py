@@ -2,6 +2,7 @@
 """Python Script For FFMPEG File Encoding"""
 
 import os
+import apt
 import sys
 import subprocess
 import sqlite3
@@ -28,6 +29,20 @@ SOURCE = ARGS.source
 DESTINATION = ARGS.destination
 SIZE = ARGS.size
 DATABASE = ARGS.database
+
+
+def check_package():
+    """Installs missing linux packages if not present"""
+    cache = apt.Cache()
+    if not cache['ffmpeg'].is_installed:
+        print("Installing FFMPEG")
+        subprocess.call(['apt', 'install', 'ffmpeg', '-y'])
+
+    if not cache['sqlite3'].is_installed:
+        print("Installing sqlite3")
+        subprocess.call(['apt', 'install', 'sqlite3', '-y'])
+
+    return
 
 
 def size_conversion(file_size):
@@ -107,6 +122,8 @@ def check_table(database):
 
 def main():
     """Main program call"""
+    check_package()
+    
     database = os.path.join(DATABASE, 'plex.db')
 
     conn = check_table(database)

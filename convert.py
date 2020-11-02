@@ -2,13 +2,13 @@
 """Python Script For FFMPEG File Encoding"""
 
 import os
-import apt
 import sys
 import subprocess
-import sqlite3
 import argparse
-
+import sqlite3
 from sqlite3 import Error
+import apt
+
 
 PARSER = argparse.ArgumentParser(description='FFMPEG Plex File Conversion')
 PARSER.add_argument('-s', '--source', type=str, required=True,
@@ -41,8 +41,6 @@ def check_package():
     if not cache['sqlite3'].is_installed:
         print("Installing sqlite3")
         subprocess.call(['apt', 'install', 'sqlite3', '-y'])
-
-    return
 
 
 def size_conversion(file_size):
@@ -88,6 +86,10 @@ def convert_file(root, file):
         subprocess.call(['ffmpeg',
                          '-i',
                          src,
+                         '-metadata',
+                         'title=',
+                         '-metadata',
+                         'comment=',
                          '-vf',
                          'scale=-2:720',
                          '-crf',
@@ -101,6 +103,7 @@ def convert_file(root, file):
     except Error as error:
         print(error)
         sys.exit()
+
 
 def check_table(database):
     """Checks whether the table exists and creats it if needed"""
@@ -123,7 +126,7 @@ def check_table(database):
 def main():
     """Main program call"""
     check_package()
-    
+
     database = os.path.join(DATABASE, 'plex.db')
 
     conn = check_table(database)
@@ -149,7 +152,8 @@ def main():
                         conn.commit()
                 else:
                     if size > size_conversion(SIZE):
-                        cur.execute("INSERT INTO plex_files(name, size) VALUES (?, ?)", (name, size))
+                        cur.execute("INSERT INTO plex_files(name, size) \
+                                    VALUES (?, ?)", (name, size))
                         conn.commit()
                         print("Converting -- " + name)
                         convert_file(root, name)

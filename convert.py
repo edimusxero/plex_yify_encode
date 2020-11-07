@@ -2,33 +2,47 @@
 """Python Script For FFMPEG File Encoding"""
 
 import os
-import apt
 import sys
 import subprocess
-import sqlite3
 import argparse
+import pymysql
+import apt
+from config_generator import ConfigJSON
+from call_configuration_class import CallConfig
 
-from sqlite3 import Error
 
 PARSER = argparse.ArgumentParser(description='FFMPEG Plex File Conversion')
-PARSER.add_argument('-s', '--source', type=str, required=True,
-                    metavar='Path of Source Files')
+PARSER.register('action', 'config', CallConfig)
 
-PARSER.add_argument('-d', '--destination', type=str, required=True,
-                    metavar='Destination for Converted Files')
+CONVERSION = PARSER.add_argument_group('Conversion', 'Parameters for File Conversion')
 
-PARSER.add_argument('-z', '--size', type=str, required=True,
-                    metavar='File Size to Parse in Bytes')
+CONVERSION = PARSER.add_argument('-i', '--source', required=True,
+                    help='Path of Source Files')
 
-PARSER.add_argument('-x', '--database', type=str, required=True,
-                    metavar='Database File Location')
+CONVERSION = PARSER.add_argument('-d', '--destination', required=True,
+                    help='Destination for Converted Files')
+
+CONVERSION = PARSER.add_argument('-s', '--size', required=True,
+                    help='File Size to Parse in Bytes')
+
+CONFIGFILE = PARSER.add_argument_group('Config',
+                                       ' - Configuration File for the MySQL Database')
+
+CONFIGFILE.add_argument('-c', '--config', nargs=0,
+                        action='config', help='Create or Edit Configuration File')
+
+CONFIGFILE.add_argument('-x', '--schema', nargs=0,
+                        action='config', help='Create Database and Schema')
 
 ARGS = PARSER.parse_args()
 
 SOURCE = ARGS.source
 DESTINATION = ARGS.destination
 SIZE = ARGS.size
-DATABASE = ARGS.database
+
+CONN = CallConfig.create_database_connection()
+
+CURSOR = CONN.cursor()
 
 
 def check_package():
@@ -37,12 +51,6 @@ def check_package():
     if not cache['ffmpeg'].is_installed:
         print("Installing FFMPEG")
         subprocess.call(['apt', 'install', 'ffmpeg', '-y'])
-
-    if not cache['sqlite3'].is_installed:
-        print("Installing sqlite3")
-        subprocess.call(['apt', 'install', 'sqlite3', '-y'])
-
-    return
 
 
 def size_conversion(file_size):
@@ -59,26 +67,6 @@ def size_conversion(file_size):
     sys.exit()
 
 
-def create_connection(db_file):
-    """Creates connection to the database"""
-    try:
-        conn = sqlite3.connect(db_file)
-        return conn
-    except Error as error:
-        print(error)
-
-    return conn
-
-
-def create_table(conn, create_table_sql):
-    """Creates Connection to the Table"""
-    try:
-        connection = conn.cursor()
-        connection.execute(create_table_sql)
-    except Error as error:
-        print(error)
-
-
 def convert_file(root, file):
     """Builds to the command to the FFMPEG File Conversion"""
     src = os.path.join(root, file)
@@ -88,6 +76,10 @@ def convert_file(root, file):
         subprocess.call(['ffmpeg',
                          '-i',
                          src,
+                         '-metadata',
+                         'title=',
+                         '-metadata',
+                         'comment=',
                          '-vf',
                          'scale=-2:720',
                          '-crf',
@@ -98,64 +90,67 @@ def convert_file(root, file):
                          'aac',
                          dest
                         ])
-    except Error as error:
+    except RuntimeError as error:
         print(error)
         sys.exit()
 
-def check_table(database):
-    """Checks whether the table exists and creats it if needed"""
-    create_plex_table = """CREATE TABLE IF NOT EXISTS plex_files (
-                                        id INTEGER PRIMARY KEY,
-                                        name TEXT NOT NULL,
-                                        size BIGINT
-                                    );"""
 
-    conn = create_connection(database)
+def process_files_for_compression(file_root, files_for_processing):
+    '''Main function for processing the file compression and database entries'''
+    for name in files_for_processing:
+        if name.endswith((".avi", ".mkv", ".mpeg", ".mp4", ".mpg")):
+            size = os.path.getsize(os.path.join(file_root, name))
+            sql_query = "SELECT id FROM compressed_files WHERE name = %s"
+            CURSOR.execute(sql_query, name)
+            result = CURSOR.fetchone()
 
-    if conn is not None:
-        create_table(conn, create_plex_table)
-    else:
-        print("Error! cannot create the database connection.")
+            if result is not None:
+                plex_id = result[0]
+                sql_query = "SELECT size FROM compressed_files WHERE id = %s"
+                CURSOR.execute(sql_query, plex_id)
+                result = CURSOR.fetchone()
 
-    return conn
+                file_size = result[0]
+
+                if file_size > size:
+                    print("Converting to a Smaller file " + name)
+                    sql_query = "UPDATE compressed_files SET size = %s WHERE name = %s"
+                    CURSOR.execute(sql_query, (size, name))
+                    CONN.commit()
+                    continue
+
+
+            else:
+                if size > size_conversion(SIZE):
+                    try:
+                        sql_query = "INSERT INTO compressed_files(name, size) VALUES (%s, %s)"
+                        CURSOR.execute(sql_query, (name, size))
+                        CONN.commit()
+                        print("Converting -- " + name)
+                        convert_file(file_root, name)
+
+                    except pymysql.OperationalError as op_error:
+                        print(op_error)
+                        CONN.rollback()
 
 
 def main():
     """Main program call"""
     check_package()
-    
-    database = os.path.join(DATABASE, 'plex.db')
 
-    conn = check_table(database)
-    cur = conn.cursor()
+    if not ConfigJSON().config_exists():
+        msg = "\nThere was no config.json file so let's create one.\n"
+        print(msg)
+        ConfigJSON().config_create()
+        sys.exit()
 
     for root, _, files in os.walk(SOURCE):
-        for name in files:
-            if name.endswith((".avi", ".mkv", ".mpeg", ".mp4", ".mpg")):
-                size = os.path.getsize(os.path.join(root, name))
-                cur.execute("SELECT id FROM plex_files WHERE name = ?", (name,))
-                result = cur.fetchone()
-
-                if result:
-                    plex_id = result[0]
-                    cur.execute("SELECT size FROM plex_files WHERE id = ?", (plex_id,))
-                    result = cur.fetchone()
-                    file_size = result[0]
-
-                    if file_size > size:
-                        print("Converting to a Smaller file " + name)
-                        cur.execute("UPDATE plex_files SET size = (?) \
-                                     WHERE name = (?)", (size, name))
-                        conn.commit()
-                else:
-                    if size > size_conversion(SIZE):
-                        cur.execute("INSERT INTO plex_files(name, size) VALUES (?, ?)", (name, size))
-                        conn.commit()
-                        print("Converting -- " + name)
-                        convert_file(root, name)
+        process_files_for_compression(root, files)
 
     print("Processing Complete!")
-    cur.close()
+    CURSOR.close()
+    CONN.close()
+
 
 if __name__ == "__main__":
     main()

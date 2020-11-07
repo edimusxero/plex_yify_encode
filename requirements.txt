@@ -1,0 +1,3 @@
+PyMySQL==0.10.1
+python_apt==2.0.0+ubuntu0.20.4.1
+apt==0.7.8

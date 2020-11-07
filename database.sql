@@ -1,0 +1,12 @@
+CREATE DATABASE IF NOT EXISTS plex_files;
+
+USE plex_files;
+
+CREATE TABLE IF NOT EXISTS `compressed_files` (
+  `Id` int NOT NULL AUTO_INCREMENT,
+  `Name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `Size` bigint NOT NULL DEFAULT '0',
+  PRIMARY KEY (`Id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+SHOW WARNINGS LIMIT 0;

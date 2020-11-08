@@ -124,6 +124,12 @@ def process_files_for_compression(file_root, files_for_processing):
 
                 if response in 'No':
                     print("Previous Run Must Have Failed.  Converting -- " + name)
+                    set_proc_query = "UPDATE compressed_files\
+                                      SET Processing = (SELECT Id FROM\
+                                      assoc_process_response WHERE Response = 'Yes')\
+                                      WHERE NAME = %s"
+                    CURSOR.execute(sql_query, (name))
+                    CONN.commit()
                     convert_file(file_root, name)
                     sql_query = "UPDATE compressed_files\
                                 SET Response = (SELECT Id FROM\
@@ -143,11 +149,20 @@ def process_files_for_compression(file_root, files_for_processing):
                         CONN.rollback()
 
                     print("Converting -- " + name)
+                    set_proc_query = "UPDATE compressed_files\
+                                      SET Processing = (SELECT Id FROM\
+                                      assoc_process_response WHERE Response = 'Yes')\
+                                      WHERE NAME = %s"
+                    CURSOR.execute(set_proc_query, (name))
+                    CONN.commit()
                     convert_file(file_root, name)
                     sql_query = "UPDATE compressed_files\
                                  SET Response = (SELECT Id\
                                  FROM assoc_process_response WHERE\
-                                 Response = 'Yes') WHERE NAME = %s"
+                                 Response = 'Yes'),\
+                                 Processing = (SELECT Id\
+                                 FROM assoc_process_response WHERE\
+                                 Response = 'No') WHERE NAME = %s"
                     CURSOR.execute(sql_query, (name))
                     CONN.commit()
 

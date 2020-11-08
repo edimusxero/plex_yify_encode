@@ -100,38 +100,56 @@ def process_files_for_compression(file_root, files_for_processing):
     for name in files_for_processing:
         if name.endswith((".avi", ".mkv", ".mpeg", ".mp4", ".mpg")):
             size = os.path.getsize(os.path.join(file_root, name))
-            sql_query = "SELECT id FROM compressed_files WHERE name = %s"
+            sql_query = "SELECT Id FROM compressed_files WHERE name = %s"
             CURSOR.execute(sql_query, name)
             result = CURSOR.fetchone()
 
             if result is not None:
                 plex_id = result[0]
-                sql_query = "SELECT size FROM compressed_files WHERE id = %s"
+                sql_query = "SELECT Size, (SELECT Response FROM assoc_process_response\
+                             WHERE compressed_files.Response = Id) AS Response\
+                             FROM compressed_files WHERE Id = %s"
                 CURSOR.execute(sql_query, plex_id)
                 result = CURSOR.fetchone()
 
                 file_size = result[0]
+                response = result[1]
 
-                if file_size > size:
+                if file_size > size and response not in 'Yes':
                     print("Converting to a Smaller file " + name)
-                    sql_query = "UPDATE compressed_files SET size = %s WHERE name = %s"
+                    sql_query = "UPDATE compressed_files SET Size = %s WHERE name = %s"
                     CURSOR.execute(sql_query, (size, name))
                     CONN.commit()
                     continue
 
+                if response in 'No':
+                    print("Previous Run Must Have Failed.  Converting -- " + name)
+                    convert_file(file_root, name)
+                    sql_query = "UPDATE compressed_files\
+                                SET Response = (SELECT Id FROM\
+                                assoc_process_response WHERE Response = 'Yes') WHERE NAME = %s"
+                    CURSOR.execute(sql_query, (name))
+                    CONN.commit()
 
             else:
                 if size > size_conversion(SIZE):
                     try:
-                        sql_query = "INSERT INTO compressed_files(name, size) VALUES (%s, %s)"
+                        sql_query = "INSERT INTO compressed_files(Name, Size) VALUES (%s, %s)"
                         CURSOR.execute(sql_query, (name, size))
                         CONN.commit()
-                        print("Converting -- " + name)
-                        convert_file(file_root, name)
 
                     except pymysql.OperationalError as op_error:
                         print(op_error)
                         CONN.rollback()
+
+                    print("Converting -- " + name)
+                    convert_file(file_root, name)
+                    sql_query = "UPDATE compressed_files\
+                                 SET Response = (SELECT Id\
+                                 FROM assoc_process_response WHERE\
+                                 Response = 'Yes') WHERE NAME = %s"
+                    CURSOR.execute(sql_query, (name))
+                    CONN.commit()
 
 
 def main():
